@@ -1,17 +1,19 @@
 // server.js
-// BUG #1: missing await in async DB simulation — always returns undefined
-// BUG #2: 200 status returned on error — misleads client
-// BUG #3: no input validation on POST /save
-// BUG #4: memory leak — global array grows without limit
-// BUG #5: no error handling middleware
-// BUG #6: GET /data returns wrong field (undefined)
 
 const express = require('express');
 const app = express();
 app.use(express.json());
 
-// BUG #4: unbounded global array — memory leak under load
+// FIX BUG #4: Memory Leak.
+const MAX_LOG_SIZE = 100;
 const requestLog = [];
+
+function addToLog(entry) {
+  if (requestLog.length >= MAX_LOG_SIZE) {
+    requestLog.shift(); // Remove oldest entry
+  }
+  requestLog.push(entry);
+}
 
 // Simulated async DB read
 async function getDataFromDB() {
@@ -21,35 +23,55 @@ async function getDataFromDB() {
 }
 
 // GET /data
-// BUG #1: missing await — data is always undefined
-// BUG #6: returns data.result which doesn't exist on the object
-app.get('/data', async (req, res) => {
-  requestLog.push({ ts: Date.now() });   // BUG #4: never trimmed
+app.get('/data', async (req, res, next) => {
+  try {
+    addToLog({ endpoint: '/data', ts: Date.now() });
 
-  const data = getDataFromDB();          // BUG #1: missing await
+    // FIX BUG #1: Missing await.
+    const data = await getDataFromDB();
 
-  if (!data) {
-    res.status(200).json({ error: 'No data found' });  // BUG #2: should be 404
-    return;
+    if (!data) {
+      // FIX BUG #2: Incorrect HTTP status
+      res.status(404).json({ error: 'No data found' });
+      return;
+    }
+
+    // FIX BUG #6: should be data.value
+    res.json({ result: data.value });
+  } catch (error) {
+    // FIX BUG #5: Add error handling
+    next(error);
   }
-
-  res.json({ result: data.result });     // BUG #6: should be data.value
+  
 });
 
 // POST /save
-// BUG #3: no validation — accepts anything including empty, null, XSS payloads
-// BUG #4: every request logged permanently
-app.post('/save', (req, res) => {
-  const { name, value } = req.body;
+app.post('/save', (req, res, next) => {
+  try {
+    const { name, value } = req.body;
 
-  // BUG #3: no validation at all
-  requestLog.push({ name, value, ts: Date.now() });  // BUG #4
+    // FIX BUG #3: Basic input validation
+    if (!name || typeof name !== 'string' || name.trim() === '') {
+      return res.status(400).json({ error: 'Invalid or missing name' });
+    }
+    if (value === undefined || value === null) {
+      return res.status(400).json({ error: 'Missing value' });
+    }
 
-  res.status(200).json({ saved: true, name, value });
+    addToLog({ endpoint: '/save', name: name.trim(), value, ts: Date.now() });  
+
+    // FIX BUG #2: Incorrect HTTP status
+    res.status(201).json({ saved: true, name: name.trim(), value });
+  } catch (error) {
+    next(error);
+  }
 });
 
-// BUG #5: no error handling middleware — unhandled errors crash or leak stack traces
-// Missing: app.use((err, req, res, next) => { ... })
+// FIX BUG #5: Add error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Unhandled Error:', err.message);
+  res.status(500).json({ error: 'Internal Server Error' });
+});
 
 app.listen(3001, () => {
   console.log('Server running on port 3001');
