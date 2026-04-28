@@ -1,30 +1,39 @@
 // app.js
 
-let cachedUser = null;
+const userCache = {};
 
 async function loadUser() {
-  const userId = document.getElementById('userId').value;
+  const userId = document.getElementById('userId').value.trim();
 
- 
-  if (userId = '') {           
+  if (userId === '') {           
     showResult('Please enter a valid ID');
     return;
   }
 
-  if (userId > 0 === false) {  
+  if (isNaN(userId) || Number(userId) <= 0) {  
     showResult('ID must be positive', true);
     return;
   }
 
-  
-  if (!cachedUser) {
-    cachedUser = fetchUser(userId);  
+  if (!userCache[userId]) {
+    userCache[userId] = fetchUser(userId);  
   }
 
-    const user = await cachedUser;
- 
-  document.getElementById('result').innerHTML =
-    `<strong>${user.name}</strong><br>${user.email}<br>${user.website}`;  
+  const user = await userCache[userId];
+
+  const resultEl = document.getElementById('result');
+  resultEl.className = '';
+
+  resultEl.textContent = '';
+
+  const strongEl = document.createElement('strong');
+  strongEl.textContent = user.name;
+
+  resultEl.appendChild(strongEl);
+  resultEl.appendChild(document.createElement('br'));
+  resultEl.appendChild(document.createTextNode(user.email));
+  resultEl.appendChild(document.createElement('br'));
+  resultEl.appendChild(document.createTextNode(user.website));
 }
 
 function showResult(message, isError = false) {
